@@ -4,6 +4,7 @@ from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 from llama_index.llms.anthropic import Anthropic
 from llama_index.core import Settings
 from dotenv import load_dotenv
+from llama_index.embeddings.fastembed import FastEmbedEmbedding
 import pymupdf
 import os
 
@@ -16,6 +17,7 @@ Settings.llm = Anthropic(
     model="claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
+Settings.embed_model = FastEmbedEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
 # Load documents
 # Load documents using PyMuPDF

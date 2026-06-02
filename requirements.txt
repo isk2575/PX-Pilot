@@ -2,5 +2,6 @@ gradio
 anthropic
 llama-index
 llama-index-llms-anthropic
+llama-index-embeddings-fastembed
 python-dotenv
 pymupdf
