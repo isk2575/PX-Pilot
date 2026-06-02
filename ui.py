@@ -124,7 +124,7 @@ with gr.Blocks(title="PX Pilot", theme=gr.themes.Base(
     neutral_hue="gray",
 )) as app:
     gr.Markdown("# 🚀 PX Pilot")
-    gr.Markdown("*AI-powered People Experience assistant for Rocket*")
+    gr.Markdown("*AI-powered People Experience assistant*")
 
     with gr.Tab(" Employee Knowledge Hub"):
         gr.Markdown("### Ask any HR or policy question")
