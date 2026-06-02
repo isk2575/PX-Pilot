@@ -1,0 +1,6 @@
+gradio
+anthropic
+llama-index
+llama-index-llms-anthropic
+python-dotenv
+pymupdf
