@@ -148,4 +148,4 @@ with gr.Blocks(title="PX Pilot", theme=gr.themes.Base(
         pdf_btn = gr.Button("Compare Policies", variant="primary")
         pdf_btn.click(compare_policies, inputs=[pdf_input_a, pdf_input_b], outputs=pdf_output)
 
-app.launch()
+app.launch(server_name="0.0.0.0", server_port=8000)
