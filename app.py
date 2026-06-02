@@ -47,7 +47,7 @@ def analyze_workflow(workflow_description):
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=2048,
-        system="""You are an HR automation consultant for Rocket's People Experience team.
+        system="""You are an HR automation consultant for a company's People Operations / HR team.
 Analyze the HR workflow and return a SHORT, visually clean report using this exact format:
 
 🔍 REPETITIVE TASKS
@@ -126,7 +126,7 @@ with gr.Blocks(title="PX Pilot", theme=gr.themes.Base(
     neutral_hue="gray",
 )) as app:
     gr.Markdown("# 🚀 PX Pilot")
-    gr.Markdown("*AI-powered People Experience assistant*")
+    gr.Markdown("*AI-powered HR/People Experience assistant*")
 
     with gr.Tab(" Employee Knowledge Hub"):
         gr.Markdown("### Ask any HR or policy question")
