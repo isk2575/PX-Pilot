@@ -11,7 +11,12 @@ import tempfile
 
 load_dotenv()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOCS_DIR = os.path.join(BASE_DIR, "documents")
+PROTECTED_FILES = ["general_us_hr_policy.pdf"]
+
 app = FastAPI()
+
 @app.get("/")
 def root():
     return {"status": "ok"}
@@ -30,14 +35,13 @@ Settings.llm = Anthropic(
     model="claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
-PROTECTED_FILES = ["general_us_hr_policy.pdf"]
 
 # Load documents
 print("Loading HR policy documents...")
 all_text = []
-for filename in os.listdir("documents"):
+for filename in os.listdir(DOCS_DIR):
     if filename.endswith(".pdf"):
-        doc = pymupdf.open(os.path.join("documents", filename))
+        doc = pymupdf.open(os.path.join(DOCS_DIR, filename))
         text = ""
         for page in doc:
             text += page.get_text()
@@ -54,26 +58,23 @@ print("Ready!")
 
 @app.post("/ask")
 async def ask(question: str = Form(...)):
-    # Check if any company docs exist (non-protected)
-    company_docs = [f for f in os.listdir("documents") 
+    company_docs = [f for f in os.listdir(DOCS_DIR)
                    if f.endswith(".pdf") and f not in PROTECTED_FILES]
-    
+
     if company_docs:
-        # Build a fresh index from only company docs
         docs_text = []
         for filename in company_docs:
-            doc = pymupdf.open(os.path.join("documents", filename))
+            doc = pymupdf.open(os.path.join(DOCS_DIR, filename))
             text = "".join(page.get_text() for page in doc)
             doc.close()
             docs_text.append(Document(text=text, metadata={"filename": filename}))
-        
+
         company_index = VectorStoreIndex.from_documents(docs_text)
         company_query_engine = company_index.as_query_engine()
         response = company_query_engine.query(question)
     else:
-        # Fall back to general policy
         response = query_engine.query(question)
-    
+
     return {"answer": str(response)}
 
 @app.post("/analyze")
@@ -113,7 +114,6 @@ async def compare(
     file_a: UploadFile = File(...),
     file_b: UploadFile = File(...)
 ):
-    # Read PDF A
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_a:
         tmp_a.write(await file_a.read())
         tmp_a_path = tmp_a.name
@@ -122,7 +122,6 @@ async def compare(
     doc_a.close()
     os.unlink(tmp_a_path)
 
-    # Read PDF B
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_b:
         tmp_b.write(await file_b.read())
         tmp_b_path = tmp_b.name
@@ -159,37 +158,32 @@ Keep each section to 3-5 bullet points max. No tables. No long paragraphs.""",
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...)):
     global index, query_engine
-    
-    # Save file permanently to documents folder
-    save_path = os.path.join("documents", file.filename)
+
+    save_path = os.path.join(DOCS_DIR, file.filename)
     with open(save_path, "wb") as f:
         f.write(await file.read())
-    
-    # Extract text
+
     doc = pymupdf.open(save_path)
     text = ""
     for page in doc:
         text += page.get_text()
     doc.close()
-    
-    # Add to existing index
+
     new_doc = Document(text=text, metadata={"filename": file.filename})
     for node in VectorStoreIndex.from_documents([new_doc]).docstore.docs.values():
         index.insert_nodes([node])
-    
+
     query_engine = index.as_query_engine()
     print(f"Saved and indexed: {file.filename}")
-    
+
     return {"message": f"Successfully uploaded {file.filename}", "filename": file.filename}
-
-
 
 @app.get("/documents")
 def get_documents():
     docs = []
-    for filename in os.listdir("documents"):
+    for filename in os.listdir(DOCS_DIR):
         if filename.endswith(".pdf") and filename not in PROTECTED_FILES:
-            path = os.path.join("documents", filename)
+            path = os.path.join(DOCS_DIR, filename)
             size = os.path.getsize(path)
             docs.append({
                 "name": filename,
@@ -201,36 +195,36 @@ def get_documents():
 @app.delete("/documents/{filename}")
 def delete_document(filename: str):
     global index, query_engine
-    
+
     if filename in PROTECTED_FILES:
         return {"message": f"{filename} is a protected file and cannot be deleted.", "protected": True}
-    
-    file_path = os.path.join("documents", filename)
+
+    file_path = os.path.join(DOCS_DIR, filename)
     if os.path.exists(file_path):
         os.remove(file_path)
-    
-    # Rebuild index without deleted file
+
     all_text = []
-    for f in os.listdir("documents"):
+    for f in os.listdir(DOCS_DIR):
         if f.endswith(".pdf"):
-            doc = pymupdf.open(os.path.join("documents", f))
+            doc = pymupdf.open(os.path.join(DOCS_DIR, f))
             text = "".join(page.get_text() for page in doc)
             doc.close()
             all_text.append(Document(text=text, metadata={"filename": f}))
-    
+
     index = VectorStoreIndex.from_documents(all_text) if all_text else VectorStoreIndex.from_documents([Document(text="No documents loaded yet.")])
     query_engine = index.as_query_engine()
-    
+
     return {"message": f"Deleted {filename}"}
+
 @app.post("/search")
 async def search(query: str = Form(...)):
-    company_docs = [f for f in os.listdir("documents") 
+    company_docs = [f for f in os.listdir(DOCS_DIR)
                    if f.endswith(".pdf") and f not in PROTECTED_FILES]
-    
+
     if company_docs:
         docs_text = []
         for filename in company_docs:
-            doc = pymupdf.open(os.path.join("documents", filename))
+            doc = pymupdf.open(os.path.join(DOCS_DIR, filename))
             text = "".join(page.get_text() for page in doc)
             doc.close()
             docs_text.append(Document(text=text, metadata={"filename": filename}))
@@ -238,9 +232,10 @@ async def search(query: str = Form(...)):
         engine = company_index.as_query_engine()
     else:
         engine = query_engine
-    
+
     response = engine.query(query)
     return {"result": str(response)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
