@@ -36,8 +36,8 @@ Settings.llm = Anthropic(
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
+Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 # Load documents
 print("Loading HR policy documents...")
 all_text = []
