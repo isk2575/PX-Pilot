@@ -1,13 +1,15 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import anthropic
-from llama_index.core import VectorStoreIndex, Document
+from llama_index.core import VectorStoreIndex, Document, Settings
 from llama_index.llms.anthropic import Anthropic
-from llama_index.core import Settings
+from llama_index.core.embeddings import BaseEmbedding
 from dotenv import load_dotenv
 import pymupdf
 import os
 import tempfile
+import hashlib
+from typing import List
 
 load_dotenv()
 
@@ -31,14 +33,38 @@ app.add_middleware(
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+# Lightweight hash-based embedding — no model download needed
+class SimpleHashEmbedding(BaseEmbedding):
+    def _get_text_embedding(self, text: str) -> List[float]:
+        words = text.lower().split()[:100]
+        embedding = [0.0] * 384
+        for word in words:
+            hash_val = int(hashlib.md5(word.encode()).hexdigest(), 16)
+            embedding[hash_val % 384] += 1.0
+        magnitude = sum(x**2 for x in embedding) ** 0.5
+        if magnitude > 0:
+            embedding = [x / magnitude for x in embedding]
+        return embedding
+
+    def _get_query_embedding(self, query: str) -> List[float]:
+        return self._get_text_embedding(query)
+
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        return self._get_query_embedding(query)
+
+    async def _aget_text_embedding(self, text: str) -> List[float]:
+        return self._get_text_embedding(text)
+
+    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return [self._get_text_embedding(t) for t in texts]
+
 Settings.llm = Anthropic(
     model="claude-haiku-4-5-20251001",
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+Settings.embed_model = SimpleHashEmbedding()
 
-Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-# Load documents
+# Load documents into RAG index
 print("Loading HR policy documents...")
 all_text = []
 for filename in os.listdir(DOCS_DIR):
@@ -50,6 +76,7 @@ for filename in os.listdir(DOCS_DIR):
         doc.close()
         all_text.append(Document(text=text, metadata={"filename": filename}))
         print(f"  Loaded: {filename}")
+
 if all_text:
     index = VectorStoreIndex.from_documents(all_text)
 else:
@@ -70,7 +97,6 @@ async def ask(question: str = Form(...)):
             text = "".join(page.get_text() for page in doc)
             doc.close()
             docs_text.append(Document(text=text, metadata={"filename": filename}))
-
         company_index = VectorStoreIndex.from_documents(docs_text)
         company_query_engine = company_index.as_query_engine()
         response = company_query_engine.query(question)
@@ -112,10 +138,7 @@ Keep each section to 2-4 bullet points max. No tables. No long paragraphs.""",
     return {"result": message.content[0].text}
 
 @app.post("/compare")
-async def compare(
-    file_a: UploadFile = File(...),
-    file_b: UploadFile = File(...)
-):
+async def compare(file_a: UploadFile = File(...), file_b: UploadFile = File(...)):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_a:
         tmp_a.write(await file_a.read())
         tmp_a_path = tmp_a.name
@@ -153,7 +176,7 @@ Compare the two HR policy documents and return a SHORT, clean report using this 
 3. [Policy Area] → Adopt [A or B]'s approach — [one sentence reason]
 
 Keep each section to 3-5 bullet points max. No tables. No long paragraphs.""",
-        messages=[{"role": "user", "content": f"Policy A:\n\n{text_a}\n\n---\n\nPolicy B:\n\n{text_b}\n\nCompare these."}]
+        messages=[{"role": "user", "content": f"Policy A:\n\n{text_a[:4000]}\n\n---\n\nPolicy B:\n\n{text_b[:4000]}\n\nCompare these."}]
     )
     return {"result": message.content[0].text}
 
@@ -187,11 +210,7 @@ def get_documents():
         if filename.endswith(".pdf") and filename not in PROTECTED_FILES:
             path = os.path.join(DOCS_DIR, filename)
             size = os.path.getsize(path)
-            docs.append({
-                "name": filename,
-                "size": f"{round(size / 1024)} KB",
-                "updated": "Preloaded"
-            })
+            docs.append({"name": filename, "size": f"{round(size / 1024)} KB", "updated": "Preloaded"})
     return {"documents": docs}
 
 @app.delete("/documents/{filename}")
@@ -199,7 +218,7 @@ def delete_document(filename: str):
     global index, query_engine
 
     if filename in PROTECTED_FILES:
-        return {"message": f"{filename} is a protected file and cannot be deleted.", "protected": True}
+        return {"message": f"{filename} is protected and cannot be deleted.", "protected": True}
 
     file_path = os.path.join(DOCS_DIR, filename)
     if os.path.exists(file_path):
