@@ -4,6 +4,8 @@ import anthropic
 from llama_index.core import VectorStoreIndex, Document, Settings
 from llama_index.llms.anthropic import Anthropic
 from llama_index.core.embeddings import BaseEmbedding
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 import pymupdf
 import os
@@ -22,6 +24,15 @@ app = FastAPI()
 @app.get("/")
 def root():
     return {"status": "ok"}
+
+frontend_build = os.path.join(BASE_DIR, "..", "frontend", "build")
+
+if os.path.exists(frontend_build):
+    app.mount("/static", StaticFiles(directory=os.path.join(frontend_build, "static")), name="static")
+
+
+
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -244,6 +255,10 @@ async def search(query: str = Form(...)):
 
     response = engine.query(query)
     return {"result": str(response)}
+
+@app.get("/{full_path:path}")
+def serve_react(full_path: str):
+    return FileResponse(os.path.join(frontend_build, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
