@@ -18,14 +18,17 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCS_DIR = os.path.join(BASE_DIR, "documents")
 PROTECTED_FILES = ["general_us_hr_policy.pdf"]
-
+frontend_build = os.path.join(BASE_DIR, "..", "frontend", "build")
 app = FastAPI()
 
 @app.get("/")
 def root():
+    index_path = os.path.join(frontend_build, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
     return {"status": "ok"}
 
-frontend_build = os.path.join(BASE_DIR, "..", "frontend", "build")
+
 
 if os.path.exists(frontend_build):
     app.mount("/static", StaticFiles(directory=os.path.join(frontend_build, "static")), name="static")
@@ -258,7 +261,10 @@ async def search(query: str = Form(...)):
 
 @app.get("/{full_path:path}")
 def serve_react(full_path: str):
-    return FileResponse(os.path.join(frontend_build, "index.html"))
+    index_path = os.path.join(frontend_build, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"error": "Frontend not found", "path": frontend_build}
 
 if __name__ == "__main__":
     import uvicorn
