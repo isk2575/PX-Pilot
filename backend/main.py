@@ -33,7 +33,6 @@ app.add_middleware(
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-# Lightweight hash-based embedding — no model download needed
 class SimpleHashEmbedding(BaseEmbedding):
     def _get_text_embedding(self, text: str) -> List[float]:
         words = text.lower().split()[:100]
@@ -64,26 +63,30 @@ Settings.llm = Anthropic(
 )
 Settings.embed_model = SimpleHashEmbedding()
 
-# Load documents into RAG index
-print("Loading HR policy documents...")
-all_text = []
-for filename in os.listdir(DOCS_DIR):
-    if filename.endswith(".pdf"):
-        doc = pymupdf.open(os.path.join(DOCS_DIR, filename))
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        doc.close()
-        all_text.append(Document(text=text, metadata={"filename": filename}))
-        print(f"  Loaded: {filename}")
-
-if all_text:
-    index = VectorStoreIndex.from_documents(all_text)
-else:
-    index = VectorStoreIndex.from_documents([Document(text="No documents loaded yet.")])
-
-query_engine = index.as_query_engine()
+# Lazy loading — index built on first request so Azure starts instantly
+index = None
+query_engine = None
 print("Ready!")
+
+def get_query_engine():
+    global index, query_engine
+    if query_engine is None:
+        print("Building index...")
+        all_text = []
+        for filename in os.listdir(DOCS_DIR):
+            if filename.endswith(".pdf"):
+                doc = pymupdf.open(os.path.join(DOCS_DIR, filename))
+                text = "".join(page.get_text() for page in doc)
+                doc.close()
+                all_text.append(Document(text=text, metadata={"filename": filename}))
+                print(f"  Loaded: {filename}")
+        if all_text:
+            index = VectorStoreIndex.from_documents(all_text)
+        else:
+            index = VectorStoreIndex.from_documents([Document(text="No documents loaded yet.")])
+        query_engine = index.as_query_engine()
+        print("Index ready!")
+    return query_engine
 
 @app.post("/ask")
 async def ask(question: str = Form(...)):
@@ -101,7 +104,7 @@ async def ask(question: str = Form(...)):
         company_query_engine = company_index.as_query_engine()
         response = company_query_engine.query(question)
     else:
-        response = query_engine.query(question)
+        response = get_query_engine().query(question)
 
     return {"answer": str(response)}
 
@@ -188,18 +191,10 @@ async def upload_document(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         f.write(await file.read())
 
-    doc = pymupdf.open(save_path)
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    doc.close()
-
-    new_doc = Document(text=text, metadata={"filename": file.filename})
-    for node in VectorStoreIndex.from_documents([new_doc]).docstore.docs.values():
-        index.insert_nodes([node])
-
-    query_engine = index.as_query_engine()
-    print(f"Saved and indexed: {file.filename}")
+    # Reset index so it rebuilds on next request
+    index = None
+    query_engine = None
+    print(f"Saved: {file.filename} — index will rebuild on next query")
 
     return {"message": f"Successfully uploaded {file.filename}", "filename": file.filename}
 
@@ -224,16 +219,9 @@ def delete_document(filename: str):
     if os.path.exists(file_path):
         os.remove(file_path)
 
-    all_text = []
-    for f in os.listdir(DOCS_DIR):
-        if f.endswith(".pdf"):
-            doc = pymupdf.open(os.path.join(DOCS_DIR, f))
-            text = "".join(page.get_text() for page in doc)
-            doc.close()
-            all_text.append(Document(text=text, metadata={"filename": f}))
-
-    index = VectorStoreIndex.from_documents(all_text) if all_text else VectorStoreIndex.from_documents([Document(text="No documents loaded yet.")])
-    query_engine = index.as_query_engine()
+    # Reset index so it rebuilds on next request
+    index = None
+    query_engine = None
 
     return {"message": f"Deleted {filename}"}
 
@@ -252,7 +240,7 @@ async def search(query: str = Form(...)):
         company_index = VectorStoreIndex.from_documents(docs_text)
         engine = company_index.as_query_engine()
     else:
-        engine = query_engine
+        engine = get_query_engine()
 
     response = engine.query(query)
     return {"result": str(response)}
